@@ -1,0 +1,149 @@
+{
+  "name": "01 - First Successful Workflow",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -96,
+        0
+      ],
+      "id": "4b5324d2-3e73-4366-8763-6ab80d2ea308",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "d11e8395-6c3d-4d70-b0b9-13c49dbfc894",
+              "name": "Messege",
+              "value": "N8N is working",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        208,
+        0
+      ],
+      "id": "fffa91e4-057c-4717-893d-572126933ba1",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "jsCode": "if ($json.isRetry === true) {\n  return [\n    {\n      json: {\n        status: 'recovered',\n        message: 'Retry completed successfully',\n        isRetry: true,\n        retryCount: $json.retryCount ?? 1\n      }\n    }\n  ];\n}\n\nthrow new Error('ETIMEDOUT: simulated network timeout');\n\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        416,
+        0
+      ],
+      "id": "392e5c0f-9efe-4bdf-8a8e-268edffa72fd",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -96,
+        192
+      ],
+      "id": "af41998b-62fc-4cc2-a694-ce3215bdecf2",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -96,
+        -176
+      ],
+      "id": "49257b54-d31a-4171-acc4-712d784d3b6a",
+      "name": "When Executed by Another Workflow"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false,
+    "timeSavedMode": "fixed",
+    "errorWorkflow": "WXrX2WPBMPKyfWE8",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "ffda97e5-eabb-438d-a75f-2c3f8704e09d",
+  "meta": {
+    "instanceId": "7ca980832f6a13fb7a521cf5ee214e6373fdbd7ea27b1bb5ec0e908882ca96dd"
+  },
+  "nodeGroups": [],
+  "id": "i3r7iczBtYLS1hWx",
+  "tags": []
+}

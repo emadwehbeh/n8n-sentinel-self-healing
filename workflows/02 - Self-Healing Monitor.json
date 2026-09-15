@@ -1,0 +1,561 @@
+{
+  "name": "02 - Self-Healing Monitor",
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\n\nreturn [\n  {\n    json: {\n      monitorReceivedError: true,\n      receivedData: input\n    }\n  }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -48,
+        80
+      ],
+      "id": "0c462349-1972-473d-a6fc-746208e504dc",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $json.content?.parts?.[0]?.text ?? '';\n\nconst original = $('Code in JavaScript').item.json.receivedData ?? {};\nconst originalError = original.execution?.error ?? original.error ?? {};\n\nconst errorText = [\n  originalError.message,\n  originalError.description,\n  originalError.stack,\n].filter(Boolean).join(' ');\n\nfunction getFallbackAnalysis() {\n  const text = errorText.toLowerCase();\n\n  if (/(etimedout|timeout|econnreset|temporary network|503|service unavailable|network)/i.test(text)) {\n    return {\n      category: 'transient_network',\n      retryable: true,\n      severity: 'medium',\n      diagnosis: 'Fallback rule detected a temporary network or timeout error.',\n      recommended_action: 'Wait, then retry the workflow up to the configured limit.'\n    };\n  }\n\n  if (/(429|rate limit|too many requests)/i.test(text)) {\n    return {\n      category: 'rate_limit',\n      retryable: true,\n      severity: 'medium',\n      diagnosis: 'Fallback rule detected a rate-limit error.',\n      recommended_action: 'Wait before retrying and reduce request frequency if needed.'\n    };\n  }\n\n  if (/(401|403|unauthorized|forbidden|authentication)/i.test(text)) {\n    return {\n      category: 'authentication',\n      retryable: false,\n      severity: 'high',\n      diagnosis: 'Fallback rule detected an authentication or authorization error.',\n      recommended_action: 'Review credentials or access permissions before retrying.'\n    };\n  }\n\n  return {\n    category: 'unknown',\n    retryable: false,\n    severity: 'medium',\n    diagnosis: 'Fallback could not safely classify the error.',\n    recommended_action: 'Review the incident manually; do not retry automatically.'\n  };\n}\n\nlet analysis;\nlet analysisSource;\n\nif (raw.trim()) {\n  const cleaned = raw\n    .replace(/^```json\\s*/i, '')\n    .replace(/\\s*```$/i, '')\n    .trim();\n\n  try {\n    analysis = JSON.parse(cleaned);\n    analysisSource = 'gemini';\n  } catch (error) {\n    analysis = getFallbackAnalysis();\n    analysisSource = 'fallback_invalid_gemini_response';\n  }\n} else {\n  analysis = getFallbackAnalysis();\n  analysisSource = 'fallback_gemini_unavailable';\n}\n\nreturn [\n  {\n    json: {\n      gemini: analysis,\n      analysisSource\n    }\n  }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        496,
+        208
+      ],
+      "id": "cb8acc5d-2ae1-40a5-b163-d1ec481c1358",
+      "name": "Parse Gemini Analysis"
+    },
+    {
+      "parameters": {
+        "jsCode": "const gemini = $json.gemini ?? {};\nconst retryCount = Number($json.retryCount ?? 0);\n\nconst allowedCategories = [\n  'transient_network',\n  'rate_limit'\n];\n\nconst retryAllowed =\n  gemini.retryable === true &&\n  allowedCategories.includes(gemini.category) &&\n  retryCount < 2;\n\nconst route = retryAllowed ? 'retry' : 'notify';\n\nreturn [\n  {\n    json: {\n      ...$json,\n      retryCount,\n      retryAllowed,\n      route,\n      retryDelaySeconds: retryCount === 0 ? 30 : 60\n    }\n  }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        656,
+        -64
+      ],
+      "id": "1d348718-3650-4215-81ad-aa8ac5e6e4fd",
+      "name": "Retry Safety Policy"
+    },
+    {
+      "parameters": {
+        "amount": 30
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1440,
+        -32
+      ],
+      "id": "11d1b19f-94e3-4e6f-ae12-c2e237c7cbd4",
+      "name": "Retry Delay",
+      "webhookId": "abaf02c7-bb0f-49f5-b0f3-1de72e16bcba"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "i3r7iczBtYLS1hWx",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/i3r7iczBtYLS1hWx",
+          "cachedResultName": "01 - First Successful Workflow"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1760,
+        -48
+      ],
+      "id": "da5b334c-7e94-4680-ade3-6e69aa06341a",
+      "name": "Retry WF1"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [\n  {\n    json: {\n      isRetry: true,\n      retryCount: ($json.retryCount ?? 0) + 1,\n      retryDelaySeconds: $json.retryDelaySeconds ?? 30,\n      retryReason: $json.gemini?.category ?? 'transient_network'\n    }\n  }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1616,
+        -256
+      ],
+      "id": "65587d00-29e0-4de3-bee6-99226426fb93",
+      "name": "Prepare Retry Request"
+    },
+    {
+      "parameters": {
+        "chatId": "1007010454",
+        "text": "=={{`✅ n8n Workflow Recovered\n\nWorkflow: 01 - First Successful Workflow\nStatus: ${$json.status ?? 'recovered'}\nRetry Attempt: ${$json.retryCount ?? 1}\nMessage: ${$json.message ?? 'Retry completed successfully'}`}}\n",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1952,
+        -256
+      ],
+      "id": "72b26a7e-a52a-47a7-a605-f28609e64747",
+      "name": "Send Recovery Report",
+      "webhookId": "56f534a0-20e1-41dd-8f0d-296b5d059b7d",
+      "credentials": {
+        "telegramApi": {
+          "id": "xplC9klmvaeuSiey",
+          "name": "Telegram - N8N Sentinel"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "19N9hjDeHaqOPhcZnfJf6XwAg5tiHSdeMyCcV8pOjgAo",
+          "mode": "list",
+          "cachedResultName": "N8N Sentinel - Incident Log",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/19N9hjDeHaqOPhcZnfJf6XwAg5tiHSdeMyCcV8pOjgAo/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Incidents",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/19N9hjDeHaqOPhcZnfJf6XwAg5tiHSdeMyCcV8pOjgAo/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Timestamp": "={{ $now.toISO() }}",
+            "Target Execution ID": "={{ $('Code in JavaScript').item.json.receivedData.execution?.id ?? '' }}",
+            "Workflow": "={{ $('Code in JavaScript').item.json.receivedData.workflow?.name ?? 'Unknown' }}",
+            "Failed Node": "={{ $('Code in JavaScript').item.json.receivedData.execution?.lastNodeExecuted ?? 'Unknown' }}\n\n",
+            "Error Message": "={{ $('Code in JavaScript').item.json.receivedData.execution?.error?.message ?? '' }}",
+            "Category": "={{ $json.gemini.category ?? 'unknown' }}",
+            "Retryable": "={{ $json.gemini.retryable ?? false }}",
+            "Severity": "={{ $json.gemini.severity ?? 'unknown' }}",
+            "Route": "={{ $json.route ?? 'notify' }}",
+            "Retry Count": "={{ $json.retryCount ?? 0 }}",
+            "Analysis Source": "={{ $json.analysisSource ?? 'fallback' }}",
+            "Recommended Action": "={{ $json.gemini.recommended_action ?? '' }}",
+            "Initial Status": "={{ $json.route === 'retry' ? 'retry_scheduled' : 'alert_sent' }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Timestamp",
+              "displayName": "Timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Target Execution ID",
+              "displayName": "Target Execution ID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Workflow",
+              "displayName": "Workflow",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Failed Node",
+              "displayName": "Failed Node",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Error Message",
+              "displayName": "Error Message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Category",
+              "displayName": "Category",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Retryable",
+              "displayName": "Retryable",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Severity",
+              "displayName": "Severity",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Route",
+              "displayName": "Route",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Retry Count",
+              "displayName": "Retry Count",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Analysis Source",
+              "displayName": "Analysis Source",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Recommended Action",
+              "displayName": "Recommended Action",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Initial Status",
+              "displayName": "Initial Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        848,
+        -16
+      ],
+      "id": "afe239e0-20f4-4576-9fec-6c7ec1004724",
+      "name": "Append row in sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "mmCo6lmhmWObqaVY",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\nreturn $items('Retry Safety Policy', 0, 0);\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        -176
+      ],
+      "id": "57c146b6-e027-468f-bde3-28fa84f18d49",
+      "name": "Restore Incident Context"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-3-flash-preview",
+          "mode": "list",
+          "cachedResultName": "models/gemini-3-flash-preview"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=You are an n8n incident classification assistant.\n\nAnalyze the workflow error data below and return ONLY valid JSON with these fields:\n{\n  \"category\": \"transient_network | invalid_data | authentication | rate_limit | configuration | unknown\",\n  \"retryable\": true,\n  \"severity\": \"low | medium | high | critical\",\n  \"diagnosis\": \"short explanation\",\n  \"recommended_action\": \"short safe recommendation\"\n}\n\nRules:\n- Set retryable to true only for temporary network, timeout, or rate-limit errors.\n- Set retryable to false for authentication, invalid data, configuration, or unknown errors.\n- Do not execute any action.\n- Do not invent information.\n\nError data:\n{{ JSON.stringify($json.receivedData) }}\n"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        144,
+        208
+      ],
+      "id": "3a023c99-e098-4b19-89cf-ad16e142b576",
+      "name": "Gemini Incident Classifier",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "cQMGJ6a6RVHQewFE",
+          "name": "Gemini - N8N Sentinel"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "chatId": "1007010454",
+        "text": "=={{`🚨 n8n Error Alert\n\nWorkflow: ${$('Code in JavaScript').item.json.receivedData.workflow?.name ?? 'Unknown'}\nFailed Node: ${$('Code in JavaScript').item.json.receivedData.execution?.error?.lastNodeExecuted ?? $('Code in JavaScript').item.json.receivedData.execution?.lastNodeExecuted ?? $('Code in JavaScript').item.json.receivedData.error?.lastNodeExecuted ?? 'Unknown'}\nError: ${$('Code in JavaScript').item.json.receivedData.execution?.error?.message ?? 'Unknown'}\nExecution ID: ${$('Code in JavaScript').item.json.receivedData.execution?.id ?? 'Unknown'}\n\n🤖 Gemini Analysis\nCategory: ${$json.gemini?.category ?? 'Unknown'}\nRetryable: ${$json.gemini?.retryable ?? 'Unknown'}\nSeverity: ${$json.gemini?.severity ?? 'Unknown'}\nDiagnosis: ${$json.gemini?.diagnosis ?? 'Unknown'}\nRecommended Action: ${$json.gemini?.recommended_action ?? 'Unknown'}`}}\n",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1552,
+        224
+      ],
+      "id": "15e1e1a5-3d15-4c0a-a096-ecfe312423f6",
+      "name": "Telegram Incident Alert",
+      "webhookId": "df85df61-0ac8-4f51-8d06-aa08644e2181",
+      "credentials": {
+        "telegramApi": {
+          "id": "xplC9klmvaeuSiey",
+          "name": "Telegram - N8N Sentinel"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "dd63f5dd-5d93-4209-a150-f14484dcca28",
+              "leftValue": "={{ $json.route }}",
+              "rightValue": "retry",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1248,
+        -16
+      ],
+      "id": "1706d6c0-f8e1-4c03-848b-9de0002226bb",
+      "name": "Route: Retry or Notify"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -256,
+        160
+      ],
+      "id": "a3efe15f-52f5-4a41-beca-0dc9253cbac2",
+      "name": "Error Trigger"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Gemini Incident Classifier",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Gemini Analysis": {
+      "main": [
+        [
+          {
+            "node": "Retry Safety Policy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Retry Safety Policy": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Retry Delay": {
+      "main": [
+        [
+          {
+            "node": "Prepare Retry Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Retry Request": {
+      "main": [
+        [
+          {
+            "node": "Retry WF1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Retry WF1": {
+      "main": [
+        [
+          {
+            "node": "Send Recovery Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append row in sheet": {
+      "main": [
+        [
+          {
+            "node": "Restore Incident Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restore Incident Context": {
+      "main": [
+        [
+          {
+            "node": "Route: Retry or Notify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Incident Classifier": {
+      "main": [
+        [
+          {
+            "node": "Parse Gemini Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Parse Gemini Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route: Retry or Notify": {
+      "main": [
+        [
+          {
+            "node": "Retry Delay",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Telegram Incident Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "85eeb8d9-a6ab-44b6-87f8-9a09dea04cd1",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "7ca980832f6a13fb7a521cf5ee214e6373fdbd7ea27b1bb5ec0e908882ca96dd"
+  },
+  "nodeGroups": [],
+  "id": "WXrX2WPBMPKyfWE8",
+  "tags": []
+}
